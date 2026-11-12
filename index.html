@@ -549,15 +549,21 @@ function setupAle(gltf) {
     if (o.isMesh) {
       o.castShadow = true; o.frustumCulled = false;
       if (o.morphTargetDictionary && o.morphTargetDictionary.blink_L !== undefined) face = o;
+      // O corpo vem do Meshy marcado como metal puro. Metal só reflete: sem um ambiente para refletir
+      // ele ignora a luz geral e fica escuro, enquanto a cabeça (não metálica) clareia. Vira tecido fosco.
+      const m = o.material;
+      if (m && m.metalness > 0.5 && !m.metalnessMap) { m.metalness = 0; m.roughness = 0.75; }
     }
   });
+  // Orientação do esqueleto medida no próprio modelo, ANTES de ele entrar no grupo girado da cena.
+  // (Medida depois, o giro de 180° do grupo entrava na conta e o rolamento saía de costas.)
+  const P = hips ? hips.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
   const box = new THREE.Box3().setFromObject(root);
   root.scale.setScalar(ASSETS_CONFIG.aleHeight / Math.max(0.01, box.max.y - box.min.y));
   aleYaw.rotation.y = Math.PI;   // a Alê olha para o sentido da corrida; na tela inicial a câmera fica na frente dela
   aleYaw.add(root);
 
   mixer = new THREE.AnimationMixer(root);
-  const P = hips ? hips.parent.getWorldQuaternion(new THREE.Quaternion()) : new THREE.Quaternion();
   const byName = {};
   gltf.animations.forEach(function (c) { byName[c.name] = c; });
   const modes = { run: 'run', jump: 'lock', roll: 'roll', death: 'lock', dance: '' };
