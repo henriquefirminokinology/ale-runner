@@ -1099,7 +1099,7 @@ function updateCamera(dt) {
   const gFov = clamp(2 * Math.atan((3.45 / dist) / aspect) * 180 / Math.PI, 58, 88);
 
   // câmera da tela inicial: de frente para a Alê, deslocada para o painel não cobrir
-  const mOff = wide ? -1.55 : 0, mR = wide ? 5.6 : 8.4, mH = wide ? 1.45 : 0.5, mTy = wide ? 1.0 : -0.75;
+  const mOff = wide ? -1.55 : 0, mR = wide ? 5.6 : 8.4, mH = wide ? 1.45 : 0.3, mTy = wide ? 1.0 : -1.25;
   const mFov = wide ? 38 : 42;
 
   // órbita: a câmera sai da frente da Alê, dá a volta pelo lado e assenta atrás dela
