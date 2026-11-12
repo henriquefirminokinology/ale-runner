@@ -127,7 +127,7 @@
       <li><span class="caps"><kbd>↑</kbd><kbd>W</kbd><kbd>Espaço</kbd></span><span>Pular</span></li>
       <li><span class="caps"><kbd>↓</kbd><kbd>S</kbd></span><span>Rolar</span></li>
     </ul>
-    <p class="hint">Barreira baixa: pule. Pórtico alto: role. Bloco: troque de faixa.<br>Colete os dinamômetros. No celular, deslize o dedo.</p>
+    <p class="hint">Barreira baixa: pule. Pórtico alto: role. Bloco e container: troque de faixa.<br>Rampa: suba e corra por cima. No celular, deslize o dedo.</p>
     <button id="btnStart" type="button" disabled>Carregando a Alê…</button>
     <p class="record">Recorde: <b id="menuBest">0</b></p>
   </div>
@@ -201,13 +201,17 @@ const INTRO_TIME = 1.3;   // duração da órbita da câmera ao iniciar (segundo
 
 /* Ajustes de jogabilidade (1 unidade ≈ 1 metro; 1 faixa = 2.2). */
 const TUNING = {
-  baseSpeed: 16,        // velocidade em 1.0x (unidades por segundo)
-  maxMult: 2.6,         // limite máximo (hard cap) do multiplicador de velocidade
-  rampScore: 2200,      // quanto maior, mais devagar a velocidade sobe com a pontuação
-  freeSeconds: 3.5,     // segundos iniciais sem obstáculo
-  gapStart: 1.5,        // intervalo entre obstáculos no início (segundos)
-  gapEnd: 0.68,         // intervalo entre obstáculos na velocidade máxima (segundos)
-  minGapDist: 14,       // distância mínima entre fileiras
+  baseSpeed: 17,        // velocidade em 1.0x (unidades por segundo)
+  maxMult: 2.5,         // limite máximo (hard cap) do multiplicador de velocidade
+  rampScore: 1700,      // quanto maior, mais devagar a velocidade sobe com a pontuação
+  freeSeconds: 2.5,     // segundos iniciais sem obstáculo
+  gapStart: 1.15,       // intervalo entre fileiras de obstáculos no início (segundos)
+  gapEnd: 0.6,          // intervalo entre fileiras na velocidade máxima (segundos)
+  minGapDist: 12,       // distância mínima entre fileiras
+  density: [0.68, 0.95],        // chance de obstáculo em cada faixa fora do caminho livre (início, máximo)
+  safeAction: [0.28, 0.7],      // chance de o caminho livre exigir pulo ou rolamento (início, máximo)
+  containerChance: [0.32, 0.5], // chance de nascer um container a cada fileira, quando não há outro (início, máximo)
+  secondContainer: [0.1, 0.34], // chance de um segundo container ao lado do primeiro (início, máximo)
   pointsPerUnit: 1,     // pontos por unidade percorrida
   tokenPoints: 10,      // pontos extras por token
   gravity: 44, jumpV: 13.2, fastFall: 30,   // pulo: ~2 de altura, 0.6 s no ar
@@ -421,10 +425,96 @@ const pool = { 1: [], 2: [], 3: [] };
 function takeMesh(type) { const g = pool[type].pop() || buildObstacle(type); g.visible = true; return g; }
 function freeMesh(o) { if (o.mesh) { o.mesh.visible = false; pool[o.type].push(o.mesh); o.mesh = null; } }
 
+/* ---------- containers ----------
+   Blocos longos que ocupam uma faixa inteira. Com rampa na frente: dá para subir e correr por cima,
+   onde ficam mais dinamômetros. Sem rampa: desvie (ou caia em cima dele vindo de outro container,
+   ou com um pulo lateral bem no alto). Bater de frente é fim de jogo; pelo lado, ela só esbarra. */
+const C_TOP = 2.4, C_MOD = 8, RAMP_LEN = 5, STEP = 0.5;
+const C_VARIANTS = [
+  { base: '#2947f0', top: '#1f3bd0', ink: '#ffffff', logo: true },
+  { base: '#06112e', top: '#0d1f5c', ink: '#c8d0ea', logo: true },
+  { base: '#f3f5f9', top: '#c8d0ea', ink: '#2947f0', logo: false }
+];
+const logoImg = new Image(), logoJobs = [];
+logoImg.onload = function () { logoJobs.forEach(function (f) { f(); }); };
+if (location.protocol !== 'file:') logoImg.src = './assets/kinology.svg';   // em file:// a imagem bloquearia a textura
+
+function sideArrows(g, cx, cy, s) {   // ‹ ›  troque de faixa
+  g.lineWidth = s * 0.34; g.lineJoin = 'round'; g.lineCap = 'round';
+  g.beginPath(); g.moveTo(cx - s * 0.7, cy - s); g.lineTo(cx - s * 1.7, cy); g.lineTo(cx - s * 0.7, cy + s); g.stroke();
+  g.beginPath(); g.moveTo(cx + s * 0.7, cy - s); g.lineTo(cx + s * 1.7, cy); g.lineTo(cx + s * 0.7, cy + s); g.stroke();
+}
+function containerMats(v) {
+  const side = canvasTex(832, 256, function (g, w, h) {
+    g.fillStyle = v.base; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(0,5,25,0.16)';
+    for (let x = 8; x < w; x += 26) g.fillRect(x, 14, 9, h - 28);        // chapa corrugada
+    g.fillStyle = 'rgba(0,5,25,0.35)'; g.fillRect(0, 0, w, 12); g.fillRect(0, h - 12, w, 12);
+    if (!v.logo) { g.fillStyle = v.ink; g.fillRect(0, h * 0.42, w, h * 0.16); }
+  });
+  if (v.logo) logoJobs.push(function () {                                  // logo da Kinology na lateral
+    const g = side.image.getContext('2d');
+    g.fillStyle = v.base; g.fillRect(196, 78, 440, 100);
+    g.drawImage(logoImg, 221, 87, 390, 81);
+    side.needsUpdate = true;
+  });
+  const door = canvasTex(256, 308, function (g, w, h) {
+    g.fillStyle = v.base; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(0,5,25,0.35)';
+    g.fillRect(0, 0, w, 10); g.fillRect(0, h - 10, w, 10); g.fillRect(0, 0, 10, h); g.fillRect(w - 10, 0, 10, h);
+    g.fillRect(w / 2 - 3, 10, 6, h - 20);
+    g.fillStyle = 'rgba(0,5,25,0.22)';
+    [52, 92, 164, 204].forEach(function (x) { g.fillRect(x - 3, 16, 6, h - 32); });
+    g.strokeStyle = v.ink; sideArrows(g, w / 2, h * 0.5, 34);
+  });
+  const std = function (tex) { return new THREE.MeshStandardMaterial({ map: tex, emissive: 0xffffff, emissiveMap: tex, emissiveIntensity: 0.22, roughness: 0.65 }); };
+  const top = new THREE.MeshStandardMaterial({ color: v.top, roughness: 0.7 });
+  const s = std(side), d = std(door);
+  return [s, s, top, top, d, d];
+}
+const cMats = C_VARIANTS.map(containerMats);
+const geoMod = new THREE.BoxGeometry(2.0, C_TOP, C_MOD - 0.2); geoMod.translate(0, C_TOP / 2, -(C_MOD - 0.2) / 2);
+
+// rampa: cunha que sobe do chão até o topo do container
+const geoRamp = new THREE.BufferGeometry();
+(function () {
+  const w = 1.0, L = RAMP_LEN, H = C_TOP;
+  const pos = [-w, 0, 0, w, 0, 0, w, H, -L, -w, H, -L,   -w, 0, 0, -w, H, -L, -w, 0, -L,   w, 0, 0, w, 0, -L, w, H, -L];
+  const uv = [0, 0, 1, 0, 1, 1, 0, 1,   0.02, 0.02, 0.02, 0.02, 0.02, 0.02,   0.02, 0.02, 0.02, 0.02, 0.02, 0.02];
+  geoRamp.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+  geoRamp.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+  geoRamp.setIndex([0, 1, 2, 0, 2, 3, 4, 5, 6, 7, 8, 9]);
+  geoRamp.computeVertexNormals();
+})();
+const texRamp = canvasTex(256, 512, function (g, w, h) {
+  g.fillStyle = '#c8d0ea'; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(0,5,25,0.12)'; g.fillRect(0, 0, 8, h); g.fillRect(w - 8, 0, 8, h);
+  g.strokeStyle = '#2947f0';
+  [116, 256, 396].forEach(function (y) { chevronPath(g, w / 2, y, 56, 1); });   // setas: suba
+});
+const rampMat = new THREE.MeshStandardMaterial({ map: texRamp, emissive: 0xffffff, emissiveMap: texRamp, emissiveIntensity: 0.25, roughness: 0.6 });
+
+const modPool = [[], [], []], rampPool = [];
+function takeMod(v) {
+  let m = modPool[v].pop();
+  if (!m) { m = new THREE.Mesh(geoMod, cMats[v]); m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+  m.visible = true; return m;
+}
+function takeRamp() {
+  let m = rampPool.pop();
+  if (!m) { m = new THREE.Mesh(geoRamp, rampMat); m.castShadow = true; m.receiveShadow = true; scene.add(m); }
+  m.visible = true; return m;
+}
+function freeSolid(s) {
+  for (let i = 0; i < s.mods.length; i++) { s.mods[i].visible = false; modPool[s.variant].push(s.mods[i]); }
+  if (s.rampMesh) { s.rampMesh.visible = false; rampPool.push(s.rampMesh); }
+  s.mods.length = 0; s.rampMesh = null;
+}
+
 /* ---------- dinamômetros coletáveis (TrackForce 3D) ----------
    O modelo é carregado uma única vez e desenhado por instâncias: aparecer um novo
    na pista não cria nada na memória nem na placa de vídeo, então não engasga. */
-const MAX_ITEMS = 48;
+const MAX_ITEMS = 72;
 const itemMeshes = [];
 function addItemMesh(geo, mat) {
   const m = new THREE.InstancedMesh(geo, mat, MAX_ITEMS);
@@ -635,10 +725,11 @@ loadGLB(ASSETS_CONFIG.dynamoModel, 'TRACKFORCE_GLB_BASE64',
 const player = { lane: 1, x: 0, y: 0, vy: 0, onGround: true, rolling: 0, rollQueued: false, jumpBuf: 0, lean: 0, kick: '' };
 const obstacles = [];   // { d, lane, type, depth, mesh }  (d = posição absoluta na pista)
 const coins = [];       // { d, lane, y, taken }
+const solids = [];      // containers: { lane, start, d0, d1, ramp, variant, mods, rampMesh }  (start = início da rampa ou do corpo)
 
 let state = 'menu';     // 'menu' | 'playing' | 'paused' | 'over'
 let distance = 0, tokens = 0, score = 0, speedMult = 1, speed = TUNING.baseSpeed;
-let time = 0, shake = 0, overReady = false, runId = 0, overT = 0, camMix = 0, blinkT = 2;
+let time = 0, shake = 0, overReady = false, runId = 0, overT = 0, camMix = 0, blinkT = 2, camFloor = 0;
 let nextRowD = 0, lastRowD = 0, safeLane = 1;
 let best = 0;
 try { best = parseInt(localStorage.getItem('aleRunner.best'), 10) || 0; } catch (e) { best = 0; }
@@ -646,6 +737,7 @@ try { best = parseInt(localStorage.getItem('aleRunner.best'), 10) || 0; } catch 
 function resetGame() {
   distance = 0; tokens = 0; score = 0; speedMult = 1; speed = TUNING.baseSpeed; shake = 0; overT = 0;
   obstacles.forEach(freeMesh); obstacles.length = 0; coins.length = 0;
+  solids.forEach(freeSolid); solids.length = 0; camFloor = 0;
   player.lane = 1; player.x = 0; player.y = 0; player.vy = 0; player.onGround = true;
   player.rolling = 0; player.rollQueued = false; player.jumpBuf = 0; player.lean = 0; player.kick = '';
   safeLane = 1; lastRowD = 12;
@@ -663,32 +755,79 @@ function addObstacle(d, lane, type) {
   obstacles.push({ d: d, lane: lane, type: type, depth: type === FULL ? 1.8 : type === LOW ? 0.5 : 0.3, mesh: takeMesh(type) });
 }
 
+/* Tem container (corpo ou rampa) na faixa l em algum ponto do trecho [a, b]? */
+function laneBusy(l, a, b) {
+  for (let i = 0; i < solids.length; i++) {
+    const s = solids[i];
+    if (s.lane === l && s.start <= b && s.d1 >= a) return true;
+  }
+  return false;
+}
+function addSolid(lane, start, n, ramp, variant) {
+  const d0 = start + (ramp ? RAMP_LEN : 0), d1 = d0 + n * C_MOD - 0.2;
+  const s = { lane: lane, start: start, d0: d0, d1: d1, ramp: ramp, variant: variant, mods: [], rampMesh: ramp ? takeRamp() : null };
+  for (let i = 0; i < n; i++) s.mods.push(takeMod(variant));
+  solids.push(s);
+  // dinamômetros em cima: o prêmio de quem sobe
+  for (let cd = d0 + 2; cd <= d1 - 2; cd += 2.6) coins.push({ d: cd, lane: lane, y: C_TOP + 1.0, taken: false });
+}
+
 function spawnRow() {
   const p = difficulty(), d = nextRowD;
-  const move = Math.random() < 0.65 ? (Math.random() < 0.5 ? -1 : 1) : 0;
-  let s = safeLane + move;
-  if (s < 0 || s > 2) s = safeLane - move;
+  const react = Math.max(6, speed * 0.45);   // espaço para entrar numa faixa depois que um container acaba
+  const rest = Math.max(12, speed * 0.9);    // espaço sem obstáculo depois do fim de um container (para quem cai de cima)
+
+  // caminho livre: fica na faixa ou vai para a vizinha, nunca para dentro de um container
+  const moves = [];
+  for (let c = safeLane - 1; c <= safeLane + 1; c += 2) if (c >= 0 && c <= 2 && !laneBusy(c, d - react, d + 1)) moves.push(c);
+  const s = (moves.length && Math.random() < 0.65) ? moves[Math.floor(Math.random() * moves.length)] : safeLane;
   safeLane = s;
 
-  let count = 0, safeType = 0;
+  // containers: nascem fora do caminho livre; às vezes dois lado a lado, sobrando uma faixa só
+  let count = 0;
+  if (d > 70) {
+    let ahead = 0;
+    for (let i = 0; i < solids.length; i++) if (solids[i].d1 > d) ahead++;
+    const chance = ahead === 0 ? lerp(TUNING.containerChance[0], TUNING.containerChance[1], p)
+      : ahead === 1 ? lerp(TUNING.secondContainer[0], TUNING.secondContainer[1], p) : 0;
+    if (Math.random() < chance) {
+      const free = [];
+      for (let l = 0; l < 3; l++) if (l !== s && !laneBusy(l, d - rest, d + 60)) free.push(l);
+      if (free.length) {
+        addSolid(free[Math.floor(Math.random() * free.length)], d, 2 + Math.floor(Math.random() * 3),
+          Math.random() < 0.55, Math.floor(Math.random() * C_VARIANTS.length));
+        count++;
+      }
+    }
+  }
+
+  // Container na faixa do meio isola as duas laterais: quem está do outro lado não tem para onde ir,
+  // então nesse trecho nenhuma faixa recebe bloqueio total (só o que dá para pular ou rolar).
+  const noFull = laneBusy(1, d - rest, d + 1 + react);
+
+  let safeType = 0;
   for (let l = 0; l < 3; l++) {
     let type = 0;
+    if (laneBusy(l, d - rest, d + 1)) continue;   // faixa com container (ou logo depois dele): sem obstáculo
     if (l === s) {
-      // na faixa segura só entra obstáculo que dá para pular ou rolar
-      if (Math.random() < 0.12 + 0.4 * p) type = Math.random() < 0.5 ? LOW : HIGH;
+      // no caminho livre só entra obstáculo que dá para pular ou rolar
+      if (Math.random() < lerp(TUNING.safeAction[0], TUNING.safeAction[1], p)) type = Math.random() < 0.5 ? LOW : HIGH;
       safeType = type;
-    } else if (Math.random() < 0.5 + 0.35 * p) {
+    } else if (Math.random() < lerp(TUNING.density[0], TUNING.density[1], p)) {
       const r = Math.random();
-      type = r < 0.5 ? FULL : r < 0.75 ? LOW : HIGH;
+      type = r < 0.5 ? (noFull ? (Math.random() < 0.5 ? LOW : HIGH) : FULL) : r < 0.75 ? LOW : HIGH;
     }
     if (type) { addObstacle(d, l, type); count++; }
   }
-  if (!count) addObstacle(d, (s + 1 + (Math.random() < 0.5 ? 0 : 1)) % 3, FULL);
+  if (!count) {
+    const l = (s + 1 + (Math.random() < 0.5 ? 0 : 1)) % 3;
+    if (!laneBusy(l, d - rest, d + 1)) addObstacle(d, l, noFull ? LOW : FULL);
+  }
 
-  // tokens indicando o caminho livre
-  if (Math.random() < 0.75) {
+  // dinamômetros indicando o caminho livre
+  if (Math.random() < 0.7) {
     const start = Math.max(lastRowD + 5, d - 16), end = d - 4;
-    for (let cd = start; cd <= end; cd += 2.6) coins.push({ d: cd, lane: s, y: 1.0, taken: false });
+    for (let cd = start; cd <= end; cd += 2.6) if (!laneBusy(s, cd - 0.6, cd + 0.6)) coins.push({ d: cd, lane: s, y: 1.0, taken: false });
     if (safeType === LOW) coins.push({ d: d + 0.25, lane: s, y: 2.4, taken: false });  // prêmio pelo pulo
   }
 
@@ -701,8 +840,31 @@ function generate() { while (nextRowD < distance + Z_FAR) spawnRow(); }
 /* ============================================================================
    6. CONTROLES
    ========================================================================== */
-function actLeft()  { if (player.lane > 0) player.lane--; }
-function actRight() { if (player.lane < 2) player.lane++; }
+/* Altura do chão na faixa, na posição da Alê: 0, o topo de um container ou um ponto da rampa. */
+function floorAt(lane) {
+  let f = 0;
+  for (let i = 0; i < solids.length; i++) {
+    const s = solids[i];
+    if (s.lane !== lane) continue;
+    const z0 = s.d0 - distance, z1 = s.d1 - distance;
+    if (z0 <= 0.25 && z1 >= -0.5) f = Math.max(f, C_TOP);
+    else if (s.ramp && z0 > 0.25 && z0 <= RAMP_LEN + 0.25) f = Math.max(f, C_TOP * (1 - (z0 - 0.25) / RAMP_LEN));
+  }
+  return f;
+}
+function tryLane(dir) {
+  const l = player.lane + dir;
+  if (l < 0 || l > 2) return;
+  if (floorAt(l) - player.y > STEP) {   // parede de container ao lado: esbarra e volta
+    const off = player.x - LANE_X[player.lane];
+    if (Math.abs(off) <= 0.45) player.x = LANE_X[player.lane] + clamp(off + dir * 0.4, -0.45, 0.45);   // nunca passa da própria faixa
+    if (!REDUCED) shake = Math.max(shake, 0.1);
+    return;
+  }
+  player.lane = l;
+}
+function actLeft()  { tryLane(-1); }
+function actRight() { tryLane(1); }
 function actJump()  { player.jumpBuf = 0.14; player.rollQueued = false; }
 function actDown() {
   if (player.onGround) { player.rolling = TUNING.rollTime; player.kick = 'roll'; }
@@ -805,16 +967,26 @@ function updatePlayer(dt) {
   player.x += (tx - player.x) * (1 - Math.exp(-dt * TUNING.laneSnap));   // troca de faixa suave e rápida
   player.lean = (tx - player.x) * 0.14;
   if (player.jumpBuf > 0) player.jumpBuf -= dt;
+
+  // chão sob os pés: pista, rampa ou topo de container
+  const floor = floorAt(clamp(Math.round(player.x / LANE_W) + 1, 0, 2));
+  player.floor = floor;
+  if (player.onGround) {
+    const dy = floor - player.y;
+    if (dy < -0.45) { player.onGround = false; player.vy = 0; }   // o chão acabou (fim do container ou troca de faixa): cai
+    else if (dy <= 1.3) player.y = floor;                         // acompanha a rampa; parede mais alta que isso é batida
+  }
   if (player.onGround && player.jumpBuf > 0) {
     player.vy = TUNING.jumpV; player.onGround = false; player.rolling = 0; player.jumpBuf = 0; player.kick = 'jump';
   }
   if (!player.onGround) {
+    const prevY = player.y;
     player.vy -= TUNING.gravity * dt;
     player.y += player.vy * dt;
-    if (player.y <= 0) {
-      player.y = 0; player.vy = 0; player.onGround = true;
+    if (player.y <= floor && prevY >= floor - 1.0) {              // pousa (na pista, na rampa ou em cima do container)
+      player.y = floor; player.vy = 0; player.onGround = true;
       if (player.rollQueued) { player.rolling = TUNING.rollTime; player.rollQueued = false; player.kick = 'roll'; }
-    }
+    } else if (player.y < 0) { player.y = 0; player.vy = 0; player.onGround = true; }
   }
   if (player.rolling > 0) player.rolling -= dt;
 }
@@ -830,12 +1002,20 @@ function checkCollisions(step) {
     if (o.type === HIGH && top <= 1.45) continue;           // rolou por baixo
     gameOver(); return;
   }
+  // containers: bater de frente (sem estar na altura do topo) ou ficar dentro da parede é fim de jogo
+  if ((player.floor || 0) - player.y > 1.0) { gameOver(); return; }
+  for (let i = 0; i < solids.length; i++) {
+    const s = solids[i], z0 = s.d0 - distance;
+    if (z0 > 0.3 || z0 + step < -0.3) continue;             // a frente dele não cruzou a Alê neste quadro
+    if (Math.abs(player.x - LANE_X[s.lane]) > 1.15) continue;
+    if (player.y >= C_TOP - STEP) continue;                 // chegou por cima (rampa ou pulo no alto)
+    gameOver(); return;
+  }
   for (let i = 0; i < coins.length; i++) {
     const c = coins[i], z = c.d - distance;
-    if (z > 0.9) break;
-    if (c.taken || z + step < -0.9) continue;
+    if (c.taken || z > 0.9 || z + step < -0.9) continue;
     if (Math.abs(player.x - LANE_X[c.lane]) > 1.1) continue;
-    if (c.y < 1.5 ? player.y > 1.6 : player.y < 0.6) continue;
+    if (Math.abs(player.y + 1.0 - c.y) > 1.3) continue;     // precisa estar na altura dele
     c.taken = true; tokens++;
     burst(LANE_X[c.lane], c.y, -z, 9, THEME.emerald, 3.6);
   }
@@ -844,7 +1024,12 @@ function checkCollisions(step) {
 /* Libera da memória o que já ficou para trás da câmera. */
 function cleanup() {
   while (obstacles.length && obstacles[0].d - distance < Z_GONE) freeMesh(obstacles.shift());
-  while (coins.length && coins[0].d - distance < Z_GONE) coins.shift();
+  let w = 0;
+  for (let i = 0; i < coins.length; i++) { const c = coins[i]; if (!c.taken && c.d - distance >= Z_GONE) coins[w++] = c; }
+  coins.length = w;
+  w = 0;
+  for (let i = 0; i < solids.length; i++) { const s = solids[i]; if (s.d1 - distance >= Z_GONE) solids[w++] = s; else freeSolid(s); }
+  solids.length = w;
 }
 
 function update(dt) {
@@ -907,8 +1092,9 @@ function updateCamera(dt) {
   // câmera do jogo: atrás e acima, mais alta e distante em tela estreita para caberem as 3 faixas
   const f = clamp((1.25 - aspect) / 0.8, 0, 1);
   const cx = player.x * 0.55;
-  gPos.set(cx, lerp(4.0, 5.8, f), lerp(6.6, 8.4, f));
-  gTgt.set(cx, lerp(1.5, 1.0, f), -7);
+  camFloor += ((state === 'playing' || state === 'paused' ? (player.floor || 0) : camFloor) - camFloor) * (1 - Math.exp(-dt * 5));  // sobe junto quando ela corre em cima de um container
+  gPos.set(cx, lerp(4.0, 5.8, f) + camFloor * 0.8, lerp(6.6, 8.4, f));
+  gTgt.set(cx, lerp(1.5, 1.0, f) + camFloor * 0.85, -7);
   const dist = Math.hypot(gPos.y - 1, gPos.z);
   const gFov = clamp(2 * Math.atan((3.45 / dist) / aspect) * 180 / Math.PI, 58, 88);
 
@@ -937,6 +1123,12 @@ function syncScene(dt) {
   for (let i = 0; i < obstacles.length; i++) {
     const o = obstacles[i];
     o.mesh.position.set(LANE_X[o.lane], 0, -(o.d - distance));
+  }
+  // containers e rampas
+  for (let i = 0; i < solids.length; i++) {
+    const s = solids[i], x = LANE_X[s.lane];
+    for (let k = 0; k < s.mods.length; k++) s.mods[k].position.set(x, 0, -(s.d0 + k * C_MOD - distance));
+    if (s.rampMesh) s.rampMesh.position.set(x, 0, -(s.start - distance));
   }
   // dinamômetros: giram no eixo Y e flutuam de leve
   let n = 0;
