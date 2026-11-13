@@ -70,7 +70,7 @@
     #menu .hint { margin-bottom: 22px; }
   }
   .panel {
-    width: min(440px, 100%); padding: 32px 28px; border-radius: 24px; text-align: center;
+    width: min(540px, 100%); padding: 32px 28px; border-radius: 24px; text-align: center;
     background: var(--painel);
     -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
   }
@@ -104,6 +104,22 @@
   .row { display: flex; justify-content: center; gap: 28px; margin: 0 0 22px; font-size: 15px; color: var(--texto-suave); font-variant-numeric: tabular-nums; }
   .row b { display: block; font-size: 22px; color: var(--texto); }
   .novo { margin: 0 0 14px; font-weight: 600; color: var(--emerald); }
+
+  /* Game Over: imagem e textos engraçados */
+  .go-title { font-size: clamp(18px, 4.5vw, 22px); font-weight: 600; line-height: 1.25; margin: 0 0 6px; }
+  .go-sub { font-size: 14px; line-height: 1.5; color: var(--texto-suave); margin: 0 0 14px; }
+  .go-bottom {
+    position: relative; display: flex; align-items: center; justify-content: center;
+    margin: 0 -28px -32px;
+  }
+  .go-img {
+    display: block; width: 100%; max-height: 56vh; object-fit: contain;
+    pointer-events: none;
+  }
+  .go-bottom button {
+    position: absolute; bottom: 16px; left: 28px; right: 28px; width: auto;
+    box-shadow: 0 4px 24px rgba(0,0,0,.5);
+  }
 </style>
 </head>
 <body>
@@ -145,7 +161,8 @@
 <!-- Game over -->
 <section class="screen" id="over" hidden>
   <div class="panel">
-    <h2>Fim de jogo</h2>
+    <p class="go-title">Opa! Achou mesmo que ia continuar jogando de graça?</p>
+    <p class="go-sub">A General Carol não deixa!</p>
     <p class="final" id="overScore">0</p>
     <p class="final-label">Pontuação final</p>
     <p class="novo" id="overNew" hidden>Novo recorde!</p>
@@ -154,7 +171,10 @@
       <span><b id="overTokens">0</b>Dinamômetros</span>
       <span><b id="overSpeed">1.0x</b>Velocidade</span>
     </div>
-    <button id="btnAgain" type="button">Jogar Novamente</button>
+    <div class="go-bottom">
+      <img class="go-img" src="./assets/ale-gameover.png" alt="Alê brava segurando uma moeda">
+      <button id="btnAgain" type="button">Jogar de novo (dessa vez passa na faixa)</button>
+    </div>
   </div>
 </section>
 
